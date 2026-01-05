@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>公司每日活動表 (自動過濾日期)</title>
+    <style>
+        :root {
+            --primary-color: #003366; 
+            --accent-color: #e6f0ff;
+            --text-main: #222;
+        }
+
+        body {
+            font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif;
+            margin: 0; padding: 0;
+            background-color: #ffffff;
+            color: var(--text-main);
+            width: 100vw; height: 100vh;
+            display: flex; flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            height: 12vh;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 0 60px;
+            background: white;
+            border-bottom: 8px solid var(--primary-color);
+        }
+
+        .logo img { height: 7vh; object-fit: contain; }
+
+        .time-box { text-align: right; }
+        #date-display { font-size: 2.2rem; color: #666; }
+        #clock-display { font-size: 4.5rem; font-weight: bold; color: var(--primary-color); line-height: 1; }
+
+        .page-title {
+            padding: 50px 60px 30px;
+            font-size: 4rem;
+            font-weight: 900;
+            color: var(--primary-color);
+            background: linear-gradient(to right, #f8f9fa, white);
+        }
+
+        main { flex: 1; padding: 0 60px 60px; }
+
+        table {
+            width: 100%; border-collapse: collapse;
+            font-size: 2.4rem; 
+            box-shadow: 0 15px 40px rgba(0,0,0,0.1);
+            border-radius: 25px; overflow: hidden;
+        }
+
+        th {
+            background-color: var(--primary-color);
+            color: white; text-align: left;
+            padding: 40px 30px; font-size: 2.6rem;
+        }
+
+        td { padding: 40px 30px; border-bottom: 2px solid #eee; background: white; line-height: 1.4; }
+
+        tr:nth-child(even) td { background-color: #fafafa; }
+
+        .location-tag {
+            color: #0066cc; font-weight: bold;
+            display: inline-block; background: #eef6ff;
+            padding: 5px 15px; border-radius: 8px;
+        }
+
+        .no-data {
+            text-align: center; padding: 150px 0;
+            font-size: 3rem; color: #bbb; background: #fff !important;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo">
+        <img src="logo.png" alt="Company Logo">
+    </div>
+    <div class="time-box">
+        <div id="date-display">2026年01月02日</div>
+        <div id="clock-display">00:00</div>
+    </div>
+</header>
+
+<div class="page-title">今日空間活動安排</div>
+
+<main>
+    <table>
+        <thead>
+            <tr>
+                <th width="20%">時間</th>
+                <th width="35%">活動項目</th>
+                <th width="25%">地點</th>
+                <th width="20%">使用者</th>
+            </tr>
+        </thead>
+        <tbody id="data-body">
+            <tr><td colspan="4" class="no-data">正在連線至後台資料庫...</td></tr>
+        </tbody>
+    </table>
+</main>
+
+<script>
+    // 1. 你的 Google Sheets CSV 網址
+    const sheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ4_yLW9apo6a7pN1PdN65cTKbnnb8bLCBUNrXwWIiP28rn_G5r7-vB1hqTZXXhr8LerJrSn4f334eu/pub?gid=0&single=true&output=csv';
+
+    // 2. 更新時鐘與日期顯示
+    function updateClock() {
+        const now = new Date();
+        // 畫面上顯示的日期 (友善閱讀格式)
+        const dateOptions = { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' };
+        document.getElementById('date-display').textContent = now.toLocaleDateString('zh-TW', dateOptions);
+        document.getElementById('clock-display').textContent = now.toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' });
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // 3. 抓取資料
+    async function fetchSheetData() {
+        try {
+            // 加入時間戳記避免快取
+            const response = await fetch(`${sheetUrl}&t=${new Date().getTime()}`);
+            if (!response.ok) throw new Error('網路回應錯誤');
+            const csvData = await response.text();
+            renderTable(csvData);
+        } catch (err) {
+            console.error("無法讀取資料:", err);
+            document.getElementById('data-body').innerHTML = '<tr><td colspan="4" class="no-data">資料讀取失敗，請檢查網路連線</td></tr>';
+        }
+    }
+
+    // 4. 解析並過濾資料
+    function renderTable(csvText) {
+        // 解析 CSV (處理可能的引號與逗號)
+        const rows = csvText.split(/\r?\n/).map(row => row.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/));
+        const tbody = document.getElementById('data-body');
+        tbody.innerHTML = '';
+
+        // 【核心修正】建立今天的 DD/MM/YY 字串
+        const now = new Date();
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const yy = String(now.getFullYear()).slice(-2);
+        const todayStr = `${dd}/${mm}/${yy}`; // 這會產生如 "02/01/26"
+
+        console.log("正在尋找日期為:", todayStr, "的資料"); // 除錯用
+
+        let hasData = false;
+
+        // 從第二列開始讀取 (i=1)
+        for (let i = 1; i < rows.length; i++) {
+            if (!rows[i][0]) continue; // 跳過空行
+
+            // 清除資料前後的空白或引號
+            const rowDate = rows[i][0].replace(/["']/g, "").trim();
+            const time     = (rows[i][1] || "").replace(/["']/g, "").trim();
+            const activity = (rows[i][2] || "").replace(/["']/g, "").trim();
+            const location = (rows[i][3] || "").replace(/["']/g, "").trim();
+            const user     = (rows[i][4] || "").replace(/["']/g, "").trim();
+
+            // 比對日期
+            if (rowDate === todayStr) {
+                hasData = true;
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${time}</td>
+                    <td><strong>${activity}</strong></td>
+                    <td><span class="location-tag">${location}</span></td>
+                    <td>${user}</td>
+                `;
+                tbody.appendChild(tr);
+            }
+        }
+
+        if (!hasData) {
+            tbody.innerHTML = `<tr><td colspan="4" class="no-data">今日暫無預約活動<br><span style="font-size:1.2rem; color:#ccc;">(系統搜尋日期: ${todayStr})</span></td></tr>`;
+        }
+    }
+
+    // 每 5 分鐘自動刷新一次
+    setInterval(fetchSheetData, 300000);
+    fetchSheetData();
+</script>
+
+</body>
+</html>
